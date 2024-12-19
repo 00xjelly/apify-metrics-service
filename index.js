@@ -1,6 +1,7 @@
 const express = require('express');
 const { google } = require('googleapis');
 const axios = require('axios');
+const crypto = require('crypto');
 require('dotenv').config();
 
 const app = express();
@@ -25,34 +26,29 @@ function formatPrivateKey(key) {
     
     console.log('Starting key formatting...');
     
-    // First, clean up the environment variable formatting
-    let formattedKey = key.toString()
-        .replace('GOOGLE_PRIVATE_KEY Value=', '')  // Remove variable prefix
-        .replace(/\\n/g, '\n')  // Handle escaped newlines
-        .replace(/["']/g, '')   // Remove any quotes
-        .trim();
+    try {
+        // Remove the environment variable prefix if it exists
+        let rawKey = key.toString().replace('GOOGLE_PRIVATE_KEY Value=', '').trim();
+        
+        // Convert escaped newlines to actual newlines
+        rawKey = rawKey.replace(/\\n/g, '\n');
+        
+        // Remove any quotes that might be present
+        rawKey = rawKey.replace(/^["']|["']$/g, '');
+        
+        // Log key properties for debugging
+        console.log('Key properties:', {
+            hasCorrectStart: rawKey.includes('-----BEGIN PRIVATE KEY-----'),
+            hasCorrectEnd: rawKey.includes('-----END PRIVATE KEY-----'),
+            containsNewlines: rawKey.includes('\n'),
+            length: rawKey.length
+        });
 
-    // Log the key's format for debugging
-    console.log('Private key format check:', {
-        hasHeader: formattedKey.includes('-----BEGIN PRIVATE KEY-----'),
-        hasFooter: formattedKey.includes('-----END PRIVATE KEY-----'),
-        length: formattedKey.length,
-        containsNewlines: formattedKey.includes('\n')
-    });
-
-    // Ensure proper line breaks for Node 22+
-    const rows = formattedKey
-        .replace('-----BEGIN PRIVATE KEY-----', '')
-        .replace('-----END PRIVATE KEY-----', '')
-        .trim()
-        .match(/.{1,64}/g) || [];
-
-    console.log('Formatted key into', rows.length, 'rows');
-
-    // Reconstruct the key with proper formatting
-    const finalKey = `-----BEGIN PRIVATE KEY-----\n${rows.join('\n')}\n-----END PRIVATE KEY-----`;
-    console.log('Key formatting complete');
-    return finalKey;
+        return rawKey;
+    } catch (error) {
+        console.error('Error formatting private key:', error);
+        throw error;
+    }
 }
 
 async function getAuth() {
@@ -65,6 +61,11 @@ async function getAuth() {
 
         console.log('Formatting private key...');
         const privateKey = formatPrivateKey(process.env.GOOGLE_PRIVATE_KEY);
+        
+        // Force Node to use legacy OpenSSL provider
+        if (crypto.setProvider) {
+            crypto.setProvider('legacy');
+        }
         
         console.log('Creating auth client...');
         const auth = new google.auth.GoogleAuth({
