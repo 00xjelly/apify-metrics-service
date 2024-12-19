@@ -21,6 +21,18 @@ async function getAuth() {
     try {
         console.log('Attempting to authenticate with Google Sheets');
         
+        // Log environment variables for debugging
+        console.log('GOOGLE_CLIENT_EMAIL:', process.env.GOOGLE_CLIENT_EMAIL);
+        console.log('GOOGLE_PRIVATE_KEY exists:', !!process.env.GOOGLE_PRIVATE_KEY);
+
+        // Validate environment variables
+        if (!process.env.GOOGLE_CLIENT_EMAIL) {
+            throw new Error('GOOGLE_CLIENT_EMAIL is not set');
+        }
+        if (!process.env.GOOGLE_PRIVATE_KEY) {
+            throw new Error('GOOGLE_PRIVATE_KEY is not set');
+        }
+
         const credentials = {
             client_email: process.env.GOOGLE_CLIENT_EMAIL,
             private_key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n')
@@ -35,9 +47,13 @@ async function getAuth() {
         console.log('Authentication successful');
         return client;
     } catch (error) {
-        console.error('Authentication Error:', {
+        console.error('Full Authentication Error:', {
             message: error.message,
-            stack: error.stack
+            stack: error.stack,
+            env: {
+                CLIENT_EMAIL: process.env.GOOGLE_CLIENT_EMAIL,
+                PRIVATE_KEY_EXISTS: !!process.env.GOOGLE_PRIVATE_KEY
+            }
         });
         throw error;
     }
