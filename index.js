@@ -19,13 +19,27 @@ const DELAY_MINUTES = 16;
 
 async function getAuth() {
     try {
+        console.log('Attempting to authenticate with Google Sheets');
+        
+        const credentials = {
+            client_email: process.env.GOOGLE_CLIENT_EMAIL,
+            private_key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n')
+        };
+
         const auth = new google.auth.GoogleAuth({
+            credentials: credentials,
             scopes: ['https://www.googleapis.com/auth/spreadsheets']
         });
-        return await auth.getClient();
+
+        const client = await auth.getClient();
+        console.log('Authentication successful');
+        return client;
     } catch (error) {
-        console.error('Authentication error:', error);
-        throw new Error('Failed to authenticate with Google Sheets API');
+        console.error('Authentication Error:', {
+            message: error.message,
+            stack: error.stack
+        });
+        throw error;
     }
 }
 
