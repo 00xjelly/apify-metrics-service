@@ -1,7 +1,6 @@
 const express = require('express');
 const { google } = require('googleapis');
 const axios = require('axios');
-const { CloudTasksClient } = require('@google-cloud/tasks');
 require('dotenv').config();
 
 const app = express();
@@ -63,7 +62,7 @@ async function updateProgress(sheetsApi, { currentBatch, totalBatches, status, l
             range: `${PROGRESS_SHEET_NAME}!A1:E1`,
             valueInputOption: 'USER_ENTERED',
             resource: {
-                values: [[
+                values: [[\
                     status,
                     currentBatch,
                     totalBatches,
@@ -77,47 +76,9 @@ async function updateProgress(sheetsApi, { currentBatch, totalBatches, status, l
     }
 }
 
-async function scheduleNextBatch(nextStartIndex) {
-    console.log(`Scheduling next batch starting at index ${nextStartIndex}`);
-    const tasksClient = new CloudTasksClient();
-    const project = QUOTA_PROJECT_ID;
-    const queue = 'tweet-metrics-queue';
-    const location = 'us-central1';
-    const url = process.env.SERVICE_URL + '/processTweetMetricsBatch';
-
-    const task = {
-        httpRequest: {
-            httpMethod: 'POST',
-            url,
-            oidcToken: {
-                serviceAccountEmail: `gcf-sheets-service-account@${QUOTA_PROJECT_ID}.iam.gserviceaccount.com`,
-            },
-            body: Buffer.from(JSON.stringify({ startIndex: nextStartIndex })).toString('base64'),
-            headers: {
-                'Content-Type': 'application/json',
-            },
-        },
-        scheduleTime: {
-            seconds: Math.floor(Date.now() / 1000) + DELAY_MINUTES * 60,
-        },
-    };
-
+// Simplified batch processing function
+async function processTweetMetricsBatch(startIndex = 0) {
     try {
-        const [response] = await tasksClient.createTask({
-            parent: tasksClient.queuePath(project, location, queue),
-            task,
-        });
-        console.log(`Successfully scheduled next batch. Task name: ${response.name}`);
-    } catch (error) {
-        console.error('Error scheduling next batch:', error);
-        throw error;
-    }
-}
-
-app.post('/processTweetMetricsBatch', async (req, res) => {
-    console.log('Received request to process batch:', req.body);
-    try {
-        const { startIndex = 0 } = req.body || {};
         const authClient = await getAuth();
         const sheetsApi = google.sheets({ version: 'v4', auth: authClient });
 
@@ -183,15 +144,19 @@ app.post('/processTweetMetricsBatch', async (req, res) => {
             }
         }
 
-        // Schedule next batch if needed
+        // Check if there are more batches to process
         if (batchEndIndex < logData.length) {
-            await scheduleNextBatch(batchEndIndex);
             await updateProgress(sheetsApi, {
                 status: 'SCHEDULED_NEXT_BATCH',
                 currentBatch,
                 totalBatches,
                 lastProcessedId: tweetIds[tweetIds.length - 1]
             });
+            
+            // Schedule next batch (you can replace this with a more robust scheduling method)
+            setTimeout(() => {
+                processTweetMetricsBatch(batchEndIndex);
+            }, DELAY_MINUTES * 60 * 1000);
         } else {
             await updateProgress(sheetsApi, {
                 status: 'COMPLETED',
@@ -201,11 +166,28 @@ app.post('/processTweetMetricsBatch', async (req, res) => {
             });
         }
 
-        res.status(200).send(`Processed batch ${currentBatch} of ${totalBatches}`);
+        console.log(`Processed batch ${currentBatch} of ${totalBatches}`);
     } catch (error) {
         console.error('Error processing batch:', error);
-        res.status(500).send(`Error processing batch: ${error.message}`);
     }
+}
+
+// Endpoint to manually trigger batch processing
+app.post('/processTweetMetricsBatch', async (req, res) => {
+    try {
+        const { startIndex = 0 } = req.body || {};
+        await processTweetMetricsBatch(startIndex);
+        res.status(200).send('Batch processing initiated');
+    } catch (error) {
+        console.error('Error initiating batch processing:', error);
+        res.status(500).send(`Error: ${error.message}`);
+    }
+});
+
+// Start initial batch processing when server starts
+app.on('listening', () => {
+    console.log('Server started, initiating initial batch processing');
+    processTweetMetricsBatch();
 });
 
 app.get('/', (req, res) => {
@@ -216,3 +198,8 @@ const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
     console.log(`Server listening on port ${PORT}`);
 });
+
+// Initial batch processing
+processTweetMetricsBatch();
+
+module.exports = app;
