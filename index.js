@@ -12,7 +12,6 @@ const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 const LOG_SHEET_NAME = 'Log';
 const POST_METRICS_SHEET_NAME = 'PostMetrics';
 const PROGRESS_SHEET_NAME = 'Progress';
-const QUOTA_PROJECT_ID = process.env.QUOTA_PROJECT_ID;
 
 // Constants for batch processing
 const BATCH_SIZE = 10;
@@ -21,8 +20,7 @@ const DELAY_MINUTES = 16;
 async function getAuth() {
     try {
         const auth = new google.auth.GoogleAuth({
-            scopes: ['https://www.googleapis.com/auth/spreadsheets'],
-            quota_project_id: QUOTA_PROJECT_ID,
+            scopes: ['https://www.googleapis.com/auth/spreadsheets']
         });
         return await auth.getClient();
     } catch (error) {
