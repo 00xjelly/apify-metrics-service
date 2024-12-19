@@ -17,6 +17,23 @@ const PROGRESS_SHEET_NAME = 'Progress';
 const BATCH_SIZE = 10;
 const DELAY_MINUTES = 16;
 
+function formatPrivateKey(key) {
+    if (!key) throw new Error('GOOGLE_PRIVATE_KEY is not set');
+    
+    // Replace escaped newlines
+    let formattedKey = key.replace(/\\n/g, '\n');
+    
+    // Ensure key has proper PEM format
+    if (!formattedKey.startsWith('-----BEGIN PRIVATE KEY-----')) {
+        formattedKey = `-----BEGIN PRIVATE KEY-----\n${formattedKey}`;
+    }
+    if (!formattedKey.endsWith('-----END PRIVATE KEY-----')) {
+        formattedKey = `${formattedKey}\n-----END PRIVATE KEY-----`;
+    }
+    
+    return formattedKey;
+}
+
 async function getAuth() {
     try {
         console.log('Attempting to authenticate with Google Sheets');
@@ -29,13 +46,10 @@ async function getAuth() {
         if (!process.env.GOOGLE_CLIENT_EMAIL) {
             throw new Error('GOOGLE_CLIENT_EMAIL is not set');
         }
-        if (!process.env.GOOGLE_PRIVATE_KEY) {
-            throw new Error('GOOGLE_PRIVATE_KEY is not set');
-        }
 
         const credentials = {
             client_email: process.env.GOOGLE_CLIENT_EMAIL,
-            private_key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n')
+            private_key: formatPrivateKey(process.env.GOOGLE_PRIVATE_KEY)
         };
 
         const auth = new google.auth.GoogleAuth({
