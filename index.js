@@ -15,31 +15,22 @@ const POST_METRICS_SHEET_NAME = 'PostMetrics';
 function formatPrivateKey(key) {
     if (!key) throw new Error('GOOGLE_PRIVATE_KEY is not set');
     
-    // Clean the key string
-    let formattedKey = key
-        .replace(/\\n/g, '\n')  // Replace escaped newlines
-        .replace(/["']/g, '')   // Remove any quotes
-        .trim();                // Remove any extra whitespace
-    
-    // Add headers if missing
-    const header = '-----BEGIN PRIVATE KEY-----\n';
-    const footer = '\n-----END PRIVATE KEY-----';
-    
-    if (!formattedKey.includes(header)) {
-        formattedKey = header + formattedKey;
-    }
-    if (!formattedKey.includes(footer)) {
-        formattedKey = formattedKey + footer;
-    }
-    
-    // Ensure proper line breaks
-    const keyBody = formattedKey
-        .replace(header, '')
-        .replace(footer, '')
+    // Convert key to string and clean it
+    let formattedKey = key.toString()
+        .replace('GOOGLE_PRIVATE_KEY Value=', '')  // Remove environment variable prefix
         .trim();
-    
-    // Reconstruct key with proper formatting
-    return `${header}${keyBody}${footer}`;
+
+    // Validate key format
+    if (!formattedKey.startsWith('-----BEGIN PRIVATE KEY-----') || 
+        !formattedKey.endsWith('-----END PRIVATE KEY-----')) {
+        console.error('Invalid key format:', {
+            startsCorrectly: formattedKey.startsWith('-----BEGIN PRIVATE KEY-----'),
+            endsCorrectly: formattedKey.endsWith('-----END PRIVATE KEY-----')
+        });
+        throw new Error('Invalid private key format');
+    }
+
+    return formattedKey;
 }
 
 async function getAuth() {
@@ -50,13 +41,11 @@ async function getAuth() {
             throw new Error('GOOGLE_CLIENT_EMAIL is not set');
         }
         
-        // Debug log for key format
         const privateKey = formatPrivateKey(process.env.GOOGLE_PRIVATE_KEY);
-        console.log('Private key format:', {
-            startsWithHeader: privateKey.startsWith('-----BEGIN PRIVATE KEY-----'),
-            endsWithFooter: privateKey.endsWith('-----END PRIVATE KEY-----'),
-            containsNewlines: privateKey.includes('\n'),
-            length: privateKey.length
+        console.log('Key validation:', {
+            hasCorrectHeader: privateKey.includes('-----BEGIN PRIVATE KEY-----'),
+            hasCorrectFooter: privateKey.includes('-----END PRIVATE KEY-----'),
+            approximateLength: privateKey.length
         });
 
         const auth = new google.auth.GoogleAuth({
