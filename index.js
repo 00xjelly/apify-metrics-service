@@ -62,7 +62,7 @@ async function updateProgress(sheetsApi, { currentBatch, totalBatches, status, l
             range: `${PROGRESS_SHEET_NAME}!A1:E1`,
             valueInputOption: 'USER_ENTERED',
             resource: {
-                values: [[\
+                values: [[
                     status,
                     currentBatch,
                     totalBatches,
@@ -153,7 +153,7 @@ async function processTweetMetricsBatch(startIndex = 0) {
                 lastProcessedId: tweetIds[tweetIds.length - 1]
             });
             
-            // Schedule next batch (you can replace this with a more robust scheduling method)
+            // Schedule next batch (simplified for Railway)
             setTimeout(() => {
                 processTweetMetricsBatch(batchEndIndex);
             }, DELAY_MINUTES * 60 * 1000);
@@ -184,12 +184,6 @@ app.post('/processTweetMetricsBatch', async (req, res) => {
     }
 });
 
-// Start initial batch processing when server starts
-app.on('listening', () => {
-    console.log('Server started, initiating initial batch processing');
-    processTweetMetricsBatch();
-});
-
 app.get('/', (req, res) => {
     res.send('Welcome! This is the Apify Metrics Service.');
 });
@@ -197,9 +191,8 @@ app.get('/', (req, res) => {
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
     console.log(`Server listening on port ${PORT}`);
+    // Trigger initial batch processing when server starts
+    processTweetMetricsBatch();
 });
-
-// Initial batch processing
-processTweetMetricsBatch();
 
 module.exports = app;
