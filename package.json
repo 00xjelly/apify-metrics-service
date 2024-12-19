@@ -1,1 +1,16 @@
-ewoJIm5hbWUiOiAiYXBpZnktbWV0cmljcy1zZXJ2aWNlIiwKCSJ2ZXJzaW9uIjogIjEuMC4wIiwKCSJtYWluIjogImluZGV4LmpzIiwKCSJlbmdpbmVzIjogewoJCSJub2RlIjogIjE2LjIwLjAiCgl9LAoJInNjcmlwdHMiOiB7CgkJInN0YXJ0IjogIm5vZGUgaW5kZXguanMiCgl9LAoJImRlcGVuZGVuY2llcyI6IHsKCQkiZXhwcmVzcyI6ICI+NC4xOC4yIiwKCQkiZ29vZ2xlYXBpcyI6ICI+PTEyOS4wLjAiLAoJCSJheGlvcyI6ICI+MS42LjIiLAoJCSJkb3RlbnYiOiAiPj0xNi4zLjEiCgl9Cn0=
+{
+  "name": "apify-metrics-service",
+  "version": "1.0.0",
+  "engines": {
+    "node": "16.20.0"
+  },
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "googleapis": "^129.0.0",
+    "axios": "^1.6.2",
+    "dotenv": "^16.3.1"
+  }
+}
