@@ -11,11 +11,23 @@ const APIFY_API_TOKEN = process.env.APIFY_API_TOKEN;
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 const LOG_SHEET_NAME = 'Log';
 const POST_METRICS_SHEET_NAME = 'PostMetrics';
-const PROGRESS_SHEET_NAME = 'Progress';
 
-// Constants for batch processing
-const BATCH_SIZE = 10;
-const DELAY_MINUTES = 16;
+function formatPrivateKey(key) {
+    if (!key) throw new Error('GOOGLE_PRIVATE_KEY is not set');
+    
+    // Replace escaped newlines
+    let formattedKey = key.replace(/\\n/g, '\n');
+    
+    // Ensure key has proper PEM format
+    if (!formattedKey.startsWith('-----BEGIN PRIVATE KEY-----')) {
+        formattedKey = `-----BEGIN PRIVATE KEY-----\n${formattedKey}`;
+    }
+    if (!formattedKey.endsWith('-----END PRIVATE KEY-----')) {
+        formattedKey = `${formattedKey}\n-----END PRIVATE KEY-----`;
+    }
+    
+    return formattedKey;
+}
 
 async function getAuth() {
     try {
@@ -29,13 +41,10 @@ async function getAuth() {
         if (!process.env.GOOGLE_CLIENT_EMAIL) {
             throw new Error('GOOGLE_CLIENT_EMAIL is not set');
         }
-        if (!process.env.GOOGLE_PRIVATE_KEY) {
-            throw new Error('GOOGLE_PRIVATE_KEY is not set');
-        }
 
         const credentials = {
             client_email: process.env.GOOGLE_CLIENT_EMAIL,
-            private_key: process.env.GOOGLE_PRIVATE_KEY.replace(/\\n/g, '\n')
+            private_key: formatPrivateKey(process.env.GOOGLE_PRIVATE_KEY)
         };
 
         const auth = new google.auth.GoogleAuth({
@@ -83,34 +92,13 @@ async function fetchTweetMetrics(tweetIds) {
     }
 }
 
-async function updateProgress(sheetsApi, { currentBatch, totalBatches, status, lastProcessedId }) {
+async function processTweetMetrics() {
     try {
-        await sheetsApi.spreadsheets.values.update({
-            spreadsheetId: SPREADSHEET_ID,
-            range: `${PROGRESS_SHEET_NAME}!A1:E1`,
-            valueInputOption: 'USER_ENTERED',
-            resource: {
-                values: [[
-                    status,
-                    currentBatch,
-                    totalBatches,
-                    `${Math.round((currentBatch / totalBatches) * 100)}%`,
-                    lastProcessedId || 'N/A'
-                ]]
-            }
-        });
-    } catch (error) {
-        console.error('Error updating progress:', error);
-    }
-}
-
-// Simplified batch processing function
-async function processTweetMetricsBatch(startIndex = 0) {
-    try {
+        console.log('Starting tweet metrics processing');
         const authClient = await getAuth();
         const sheetsApi = google.sheets({ version: 'v4', auth: authClient });
 
-        // Fetch tweet IDs from log sheet
+        // Fetch all tweet IDs from log sheet
         const logResponse = await sheetsApi.spreadsheets.values.get({
             spreadsheetId: SPREADSHEET_ID,
             range: `${LOG_SHEET_NAME}!A2:D`,
@@ -121,29 +109,15 @@ async function processTweetMetricsBatch(startIndex = 0) {
         }
 
         const logData = logResponse.data.values;
-        const totalBatches = Math.ceil(logData.length / BATCH_SIZE);
-        const currentBatch = Math.floor(startIndex / BATCH_SIZE) + 1;
-        const batchEndIndex = Math.min(startIndex + BATCH_SIZE, logData.length);
+        const tweetIds = logData.map(row => row[3]).filter(Boolean);
+        console.log(`Found ${tweetIds.length} tweets to process`);
 
-        // Get tweet IDs for this batch
-        const tweetIds = [];
-        for (let i = startIndex; i < batchEndIndex; i++) {
-            const [, , , tweetId] = logData[i];
-            if (tweetId) tweetIds.push(tweetId);
-        }
-
-        await updateProgress(sheetsApi, {
-            status: 'PROCESSING',
-            currentBatch,
-            totalBatches,
-            lastProcessedId: 'Starting batch...'
-        });
-
-        // Fetch metrics for all tweets in batch
+        // Fetch metrics for all tweets at once
         const metricsData = await fetchTweetMetrics(tweetIds);
+        console.log(`Fetched metrics for ${metricsData.length} tweets`);
 
         // Process each tweet's metrics
-        for (const tweetData of metricsData) {
+        const updatePromises = metricsData.map(tweetData => {
             const rowData = [
                 tweetData.created_at,
                 tweetData.id,
@@ -159,55 +133,29 @@ async function processTweetMetricsBatch(startIndex = 0) {
                 tweetData.text || 'N/A'
             ];
 
-            // Update or append to sheet
-            try {
-                await sheetsApi.spreadsheets.values.append({
-                    spreadsheetId: SPREADSHEET_ID,
-                    range: `${POST_METRICS_SHEET_NAME}!A1:L`,
-                    valueInputOption: 'USER_ENTERED',
-                    resource: { values: [rowData] }
-                });
-            } catch (error) {
-                console.error(`Error updating sheet for tweet ${tweetData.id}:`, error);
-            }
-        }
-
-        // Check if there are more batches to process
-        if (batchEndIndex < logData.length) {
-            await updateProgress(sheetsApi, {
-                status: 'SCHEDULED_NEXT_BATCH',
-                currentBatch,
-                totalBatches,
-                lastProcessedId: tweetIds[tweetIds.length - 1]
+            return sheetsApi.spreadsheets.values.append({
+                spreadsheetId: SPREADSHEET_ID,
+                range: `${POST_METRICS_SHEET_NAME}!A1:L`,
+                valueInputOption: 'USER_ENTERED',
+                resource: { values: [rowData] }
             });
-            
-            // Schedule next batch (simplified for Railway)
-            setTimeout(() => {
-                processTweetMetricsBatch(batchEndIndex);
-            }, DELAY_MINUTES * 60 * 1000);
-        } else {
-            await updateProgress(sheetsApi, {
-                status: 'COMPLETED',
-                currentBatch: totalBatches,
-                totalBatches,
-                lastProcessedId: tweetIds[tweetIds.length - 1]
-            });
-        }
+        });
 
-        console.log(`Processed batch ${currentBatch} of ${totalBatches}`);
+        await Promise.all(updatePromises);
+        console.log('Successfully processed all tweets');
     } catch (error) {
-        console.error('Error processing batch:', error);
+        console.error('Error processing tweets:', error);
+        throw error;
     }
 }
 
-// Endpoint to manually trigger batch processing
-app.post('/processTweetMetricsBatch', async (req, res) => {
+// Endpoint to trigger tweet metrics processing
+app.post('/processTweetMetrics', async (req, res) => {
     try {
-        const { startIndex = 0 } = req.body || {};
-        await processTweetMetricsBatch(startIndex);
-        res.status(200).send('Batch processing initiated');
+        await processTweetMetrics();
+        res.status(200).send('Tweet metrics processing completed');
     } catch (error) {
-        console.error('Error initiating batch processing:', error);
+        console.error('Error processing tweets:', error);
         res.status(500).send(`Error: ${error.message}`);
     }
 });
@@ -219,8 +167,8 @@ app.get('/', (req, res) => {
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
     console.log(`Server listening on port ${PORT}`);
-    // Trigger initial batch processing when server starts
-    processTweetMetricsBatch();
+    // Trigger initial processing when server starts
+    processTweetMetrics();
 });
 
 module.exports = app;
