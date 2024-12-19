@@ -11,4 +11,4 @@ COPY . .
 # Expose the port the app runs on
 EXPOSE 8080
 # Define the command to run the application
-CMD ["node", "--openssl-legacy-provider", "index.js"]
+CMD ["node", "index.js"]
