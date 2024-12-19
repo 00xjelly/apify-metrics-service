@@ -1,31 +1,23 @@
 const express = require('express');
 const { google } = require('googleapis');
+const axios = require('axios');
 const { CloudTasksClient } = require('@google-cloud/tasks');
-const { ApifyClient } = require('apify-client');
 require('dotenv').config();
 
 const app = express();
 app.use(express.json());
 
 // Configuration constants
-const APIFY_TOKEN = process.env.APIFY_API_TOKEN;
+const APIFY_API_TOKEN = process.env.APIFY_API_TOKEN;
 const SPREADSHEET_ID = process.env.SPREADSHEET_ID;
 const LOG_SHEET_NAME = 'Log';
 const POST_METRICS_SHEET_NAME = 'PostMetrics';
 const PROGRESS_SHEET_NAME = 'Progress';
 const QUOTA_PROJECT_ID = process.env.QUOTA_PROJECT_ID;
-const ACTOR_ID = process.env.APIFY_ACTOR_ID;
 
-// Initialize Apify client
-const apifyClient = new ApifyClient({
-    token: APIFY_TOKEN,
-});
-
-// Batch processing constants
+// Constants for batch processing
 const BATCH_SIZE = 10;
 const DELAY_MINUTES = 16;
-const API_RETRY_DELAY = 60000;
-const MAX_RETRIES = 3;
 
 async function getAuth() {
     try {
@@ -40,45 +32,26 @@ async function getAuth() {
     }
 }
 
-function formatDateForSheets(dateStr = new Date()) {
-    const date = new Date(dateStr);
-    return date.toISOString().replace('T', ' ').slice(0, 19);
-}
-
-async function getTweetIdRowIndex(sheetsApi, tweetId) {
+async function fetchTweetMetrics(tweetIds) {
     try {
-        const response = await sheetsApi.spreadsheets.values.get({
-            spreadsheetId: SPREADSHEET_ID,
-            range: `${POST_METRICS_SHEET_NAME}!B2:B`,
-        });
+        const response = await axios.post(
+            'https://api.apify.com/v2/acts/kaitoeasyapi~twitter-x-data-tweet-scraper-pay-per-result-cheapest/run-sync-get-dataset-items',
+            {
+                tweetIDs: tweetIds,
+                maxItems: tweetIds.length,
+                queryType: "Latest"
+            },
+            {
+                headers: {
+                    'Authorization': `Bearer ${APIFY_API_TOKEN}`,
+                    'Content-Type': 'application/json'
+                }
+            }
+        );
 
-        const tweetIds = response.data.values || [];
-        const rowIndex = tweetIds.findIndex(row => row[0] === tweetId);
-        return rowIndex === -1 ? -1 : rowIndex + 2;
+        return response.data;
     } catch (error) {
-        console.error('Error finding tweet ID:', error);
-        throw new Error('Failed to search for tweet ID in spreadsheet');
-    }
-}
-
-async function getPostMetrics(postId) {
-    try {
-        // Start the Apify actor run
-        const run = await apifyClient.actor(ACTOR_ID).call({
-            postUrls: [`https://twitter.com/i/web/status/${postId}`],
-            maxRequestRetries: 3,
-        });
-
-        // Wait for the run to finish and get the dataset items
-        const { items } = await apifyClient.dataset(run.defaultDatasetId).listItems();
-        
-        if (!items || items.length === 0) {
-            throw new Error(`No data found for post ${postId}`);
-        }
-
-        return items[0]; // Return the first item since we're only scraping one post
-    } catch (error) {
-        console.error(`Error fetching metrics for post ${postId}:`, error);
+        console.error('Error fetching tweet metrics:', error);
         throw error;
     }
 }
@@ -110,7 +83,7 @@ async function scheduleNextBatch(nextStartIndex) {
     const project = QUOTA_PROJECT_ID;
     const queue = 'tweet-metrics-queue';
     const location = 'us-central1';
-    const url = 'https://apify-metrics-service-url/processTweetMetricsBatch'; // Update with your service URL
+    const url = process.env.SERVICE_URL + '/processTweetMetricsBatch';
 
     const task = {
         httpRequest: {
@@ -142,11 +115,97 @@ async function scheduleNextBatch(nextStartIndex) {
 }
 
 app.post('/processTweetMetricsBatch', async (req, res) => {
-    // [Batch processing code - continued in next update]
-});
+    console.log('Received request to process batch:', req.body);
+    try {
+        const { startIndex = 0 } = req.body || {};
+        const authClient = await getAuth();
+        const sheetsApi = google.sheets({ version: 'v4', auth: authClient });
 
-app.post('/processTweetMetrics', async (req, res) => {
-    // [Single tweet processing code - continued in next update]
+        // Fetch tweet IDs from log sheet
+        const logResponse = await sheetsApi.spreadsheets.values.get({
+            spreadsheetId: SPREADSHEET_ID,
+            range: `${LOG_SHEET_NAME}!A2:D`,
+        });
+
+        if (!logResponse.data.values) {
+            throw new Error('No data found in Log sheet');
+        }
+
+        const logData = logResponse.data.values;
+        const totalBatches = Math.ceil(logData.length / BATCH_SIZE);
+        const currentBatch = Math.floor(startIndex / BATCH_SIZE) + 1;
+        const batchEndIndex = Math.min(startIndex + BATCH_SIZE, logData.length);
+
+        // Get tweet IDs for this batch
+        const tweetIds = [];
+        for (let i = startIndex; i < batchEndIndex; i++) {
+            const [, , , tweetId] = logData[i];
+            if (tweetId) tweetIds.push(tweetId);
+        }
+
+        await updateProgress(sheetsApi, {
+            status: 'PROCESSING',
+            currentBatch,
+            totalBatches,
+            lastProcessedId: 'Starting batch...'
+        });
+
+        // Fetch metrics for all tweets in batch
+        const metricsData = await fetchTweetMetrics(tweetIds);
+
+        // Process each tweet's metrics
+        for (const tweetData of metricsData) {
+            const rowData = [
+                tweetData.created_at,
+                tweetData.id,
+                tweetData.url,
+                tweetData.created_at.split('T')[0],
+                tweetData.public_metrics?.impression_count || 0,
+                tweetData.public_metrics?.like_count || 0,
+                tweetData.public_metrics?.reply_count || 0,
+                tweetData.public_metrics?.retweet_count || 0,
+                'N/A',
+                new Date().toISOString().replace('T', ' ').slice(0, 19),
+                tweetData.url,
+                tweetData.text || 'N/A'
+            ];
+
+            // Update or append to sheet
+            try {
+                await sheetsApi.spreadsheets.values.append({
+                    spreadsheetId: SPREADSHEET_ID,
+                    range: `${POST_METRICS_SHEET_NAME}!A1:L`,
+                    valueInputOption: 'USER_ENTERED',
+                    resource: { values: [rowData] }
+                });
+            } catch (error) {
+                console.error(`Error updating sheet for tweet ${tweetData.id}:`, error);
+            }
+        }
+
+        // Schedule next batch if needed
+        if (batchEndIndex < logData.length) {
+            await scheduleNextBatch(batchEndIndex);
+            await updateProgress(sheetsApi, {
+                status: 'SCHEDULED_NEXT_BATCH',
+                currentBatch,
+                totalBatches,
+                lastProcessedId: tweetIds[tweetIds.length - 1]
+            });
+        } else {
+            await updateProgress(sheetsApi, {
+                status: 'COMPLETED',
+                currentBatch: totalBatches,
+                totalBatches,
+                lastProcessedId: tweetIds[tweetIds.length - 1]
+            });
+        }
+
+        res.status(200).send(`Processed batch ${currentBatch} of ${totalBatches}`);
+    } catch (error) {
+        console.error('Error processing batch:', error);
+        res.status(500).send(`Error processing batch: ${error.message}`);
+    }
 });
 
 app.get('/', (req, res) => {
