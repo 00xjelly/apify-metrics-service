@@ -1,3 +1,5 @@
+if (process.env.NODE_OPTIONS) {
+  require('crypto');  // Ensure crypto is loaded first
 const express = require('express');
 const { google } = require('googleapis');
 const axios = require('axios');
