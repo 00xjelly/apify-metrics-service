@@ -18,14 +18,16 @@ function formatPrivateKey(key) {
     // Convert key to string and clean it
     let formattedKey = key.toString()
         .replace('GOOGLE_PRIVATE_KEY Value=', '')  // Remove environment variable prefix
+        .replace(/\\n/g, '\n')  // Replace escaped newlines
         .trim();
 
     // Validate key format
-    if (!formattedKey.startsWith('-----BEGIN PRIVATE KEY-----') || 
-        !formattedKey.endsWith('-----END PRIVATE KEY-----')) {
+    if (!formattedKey.includes('-----BEGIN PRIVATE KEY-----') || 
+        !formattedKey.includes('-----END PRIVATE KEY-----')) {
         console.error('Invalid key format:', {
-            startsCorrectly: formattedKey.startsWith('-----BEGIN PRIVATE KEY-----'),
-            endsCorrectly: formattedKey.endsWith('-----END PRIVATE KEY-----')
+            hasHeader: formattedKey.includes('-----BEGIN PRIVATE KEY-----'),
+            hasFooter: formattedKey.includes('-----END PRIVATE KEY-----'),
+            keyLength: formattedKey.length
         });
         throw new Error('Invalid private key format');
     }
