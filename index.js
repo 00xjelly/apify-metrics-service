@@ -1,6 +1,7 @@
 if (process.env.NODE_OPTIONS) {
   require('crypto');  // Ensure crypto is loaded first
 }
+
 const express = require('express');
 const { google } = require('googleapis');
 const axios = require('axios');
@@ -30,26 +31,50 @@ function formatPrivateKey(key) {
     console.log('Starting key formatting...');
     
     try {
-        // Remove the environment variable prefix if it exists
-        let rawKey = key.toString().replace('GOOGLE_PRIVATE_KEY Value=', '').trim();
+        // Convert to string and trim
+        let rawKey = key.toString().trim();
         
-        // Convert escaped newlines to actual newlines
-        rawKey = rawKey.replace(/\\n/g, '\n');
+        // Remove any environment variable prefix
+        rawKey = rawKey.replace(/^GOOGLE_PRIVATE_KEY\s*=\s*/, '').trim();
         
-        // Remove any quotes that might be present
+        // Remove any quotes
         rawKey = rawKey.replace(/^["']|["']$/g, '');
         
-        // Log key properties for debugging
-        console.log('Key properties:', {
-            hasCorrectStart: rawKey.includes('-----BEGIN PRIVATE KEY-----'),
-            hasCorrectEnd: rawKey.includes('-----END PRIVATE KEY-----'),
-            containsNewlines: rawKey.includes('\n'),
-            length: rawKey.length
+        // Replace escaped newlines with actual newlines
+        rawKey = rawKey.replace(/\\n/g, '\n');
+        
+        // Ensure proper PEM format
+        if (!rawKey.includes('-----BEGIN PRIVATE KEY-----')) {
+            rawKey = '-----BEGIN PRIVATE KEY-----\n' + rawKey;
+        }
+        
+        if (!rawKey.includes('-----END PRIVATE KEY-----')) {
+            rawKey += '\n-----END PRIVATE KEY-----';
+        }
+        
+        // Normalize line breaks and remove any extra whitespace
+        const lines = rawKey.split('\n')
+            .map(line => line.trim())
+            .filter(line => line.length > 0);
+        
+        rawKey = lines.join('\n');
+        
+        // Log detailed key information for debugging
+        console.log('Formatted Key Details:', {
+            startsWith: rawKey.startsWith('-----BEGIN PRIVATE KEY-----'),
+            endsWith: rawKey.endsWith('-----END PRIVATE KEY-----'),
+            length: rawKey.length,
+            firstLine: rawKey.split('\n')[0],
+            lastLine: rawKey.split('\n').pop()
         });
 
         return rawKey;
     } catch (error) {
-        console.error('Error formatting private key:', error);
+        console.error('Comprehensive Private Key Formatting Error:', {
+            originalKey: key,
+            errorMessage: error.message,
+            stack: error.stack
+        });
         throw error;
     }
 }
@@ -62,15 +87,12 @@ async function getAuth() {
             throw new Error('GOOGLE_CLIENT_EMAIL is not set');
         }
 
-        console.log('Formatting private key...');
+        console.log('Raw Private Key:', process.env.GOOGLE_PRIVATE_KEY);
+        
         const privateKey = formatPrivateKey(process.env.GOOGLE_PRIVATE_KEY);
         
-        // Force Node to use legacy OpenSSL provider
-        if (crypto.setProvider) {
-            crypto.setProvider('legacy');
-        }
+        console.log('Formatted Private Key:', privateKey);
         
-        console.log('Creating auth client...');
         const auth = new google.auth.GoogleAuth({
             credentials: {
                 client_email: process.env.GOOGLE_CLIENT_EMAIL,
@@ -79,15 +101,15 @@ async function getAuth() {
             scopes: ['https://www.googleapis.com/auth/spreadsheets']
         });
 
-        console.log('Getting client...');
         const client = await auth.getClient();
         console.log('Authentication successful');
         return client;
     } catch (error) {
-        console.error('Authentication Error:', {
+        console.error('Comprehensive Authentication Error:', {
             message: error.message,
             code: error.code,
-            stack: error.stack
+            stack: error.stack,
+            clientEmail: process.env.GOOGLE_CLIENT_EMAIL
         });
         throw error;
     }
