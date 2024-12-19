@@ -1,10 +1,10 @@
-FROM node:18-alpine
+FROM node:18.19-alpine
 
 WORKDIR /app
-COPY package.json .
-COPY index.js .
+
+COPY package*.json ./
+COPY index.js ./
 
 RUN npm install
 
-ENV NODE_ENV=production
 CMD ["npm", "start"]
