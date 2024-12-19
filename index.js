@@ -15,17 +15,23 @@ const POST_METRICS_SHEET_NAME = 'PostMetrics';
 function formatPrivateKey(key) {
     if (!key) throw new Error('GOOGLE_PRIVATE_KEY is not set');
     
-    // Replace escaped newlines
-    let formattedKey = key.replace(/\\n/g, '\n');
-    
-    // Ensure key has proper PEM format
-    if (!formattedKey.startsWith('-----BEGIN PRIVATE KEY-----')) {
-        formattedKey = `-----BEGIN PRIVATE KEY-----\n${formattedKey}`;
+    // Convert key to string and clean it
+    let formattedKey = key.toString()
+        .replace('GOOGLE_PRIVATE_KEY Value=', '')  // Remove environment variable prefix
+        .replace(/\\n/g, '\n')  // Replace escaped newlines
+        .trim();
+
+    // Validate key format
+    if (!formattedKey.includes('-----BEGIN PRIVATE KEY-----') || 
+        !formattedKey.includes('-----END PRIVATE KEY-----')) {
+        console.error('Invalid key format:', {
+            hasHeader: formattedKey.includes('-----BEGIN PRIVATE KEY-----'),
+            hasFooter: formattedKey.includes('-----END PRIVATE KEY-----'),
+            keyLength: formattedKey.length
+        });
+        throw new Error('Invalid private key format');
     }
-    if (!formattedKey.endsWith('-----END PRIVATE KEY-----')) {
-        formattedKey = `${formattedKey}\n-----END PRIVATE KEY-----`;
-    }
-    
+
     return formattedKey;
 }
 
@@ -33,22 +39,22 @@ async function getAuth() {
     try {
         console.log('Attempting to authenticate with Google Sheets');
         
-        // Log environment variables for debugging
-        console.log('GOOGLE_CLIENT_EMAIL:', process.env.GOOGLE_CLIENT_EMAIL);
-        console.log('GOOGLE_PRIVATE_KEY exists:', !!process.env.GOOGLE_PRIVATE_KEY);
-
-        // Validate environment variables
         if (!process.env.GOOGLE_CLIENT_EMAIL) {
             throw new Error('GOOGLE_CLIENT_EMAIL is not set');
         }
-
-        const credentials = {
-            client_email: process.env.GOOGLE_CLIENT_EMAIL,
-            private_key: formatPrivateKey(process.env.GOOGLE_PRIVATE_KEY)
-        };
+        
+        const privateKey = formatPrivateKey(process.env.GOOGLE_PRIVATE_KEY);
+        console.log('Key validation:', {
+            hasCorrectHeader: privateKey.includes('-----BEGIN PRIVATE KEY-----'),
+            hasCorrectFooter: privateKey.includes('-----END PRIVATE KEY-----'),
+            approximateLength: privateKey.length
+        });
 
         const auth = new google.auth.GoogleAuth({
-            credentials: credentials,
+            credentials: {
+                client_email: process.env.GOOGLE_CLIENT_EMAIL,
+                private_key: privateKey
+            },
             scopes: ['https://www.googleapis.com/auth/spreadsheets']
         });
 
@@ -56,13 +62,10 @@ async function getAuth() {
         console.log('Authentication successful');
         return client;
     } catch (error) {
-        console.error('Full Authentication Error:', {
+        console.error('Authentication Error:', {
             message: error.message,
-            stack: error.stack,
-            env: {
-                CLIENT_EMAIL: process.env.GOOGLE_CLIENT_EMAIL,
-                PRIVATE_KEY_EXISTS: !!process.env.GOOGLE_PRIVATE_KEY
-            }
+            code: error.code,
+            stack: error.stack
         });
         throw error;
     }
