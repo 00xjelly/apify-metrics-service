@@ -15,24 +15,30 @@ const POST_METRICS_SHEET_NAME = 'PostMetrics';
 function formatPrivateKey(key) {
     if (!key) throw new Error('GOOGLE_PRIVATE_KEY is not set');
     
-    // Convert key to string and clean it
+    // First, clean up the environment variable formatting
     let formattedKey = key.toString()
-        .replace('GOOGLE_PRIVATE_KEY Value=', '')  // Remove environment variable prefix
-        .replace(/\\n/g, '\n')  // Replace escaped newlines
+        .replace('GOOGLE_PRIVATE_KEY Value=', '')  // Remove variable prefix
+        .replace(/\\n/g, '\n')  // Handle escaped newlines
+        .replace(/["']/g, '')   // Remove any quotes
         .trim();
 
-    // Validate key format
-    if (!formattedKey.includes('-----BEGIN PRIVATE KEY-----') || 
-        !formattedKey.includes('-----END PRIVATE KEY-----')) {
-        console.error('Invalid key format:', {
-            hasHeader: formattedKey.includes('-----BEGIN PRIVATE KEY-----'),
-            hasFooter: formattedKey.includes('-----END PRIVATE KEY-----'),
-            keyLength: formattedKey.length
-        });
-        throw new Error('Invalid private key format');
-    }
+    // Log the key's format for debugging
+    console.log('Private key format check:', {
+        hasHeader: formattedKey.includes('-----BEGIN PRIVATE KEY-----'),
+        hasFooter: formattedKey.includes('-----END PRIVATE KEY-----'),
+        length: formattedKey.length,
+        containsNewlines: formattedKey.includes('\n')
+    });
 
-    return formattedKey;
+    // Ensure proper line breaks for Node 22+
+    const rows = formattedKey
+        .replace('-----BEGIN PRIVATE KEY-----', '')
+        .replace('-----END PRIVATE KEY-----', '')
+        .trim()
+        .match(/.{1,64}/g) || [];
+
+    // Reconstruct the key with proper formatting
+    return `-----BEGIN PRIVATE KEY-----\n${rows.join('\n')}\n-----END PRIVATE KEY-----`;
 }
 
 async function getAuth() {
@@ -42,14 +48,9 @@ async function getAuth() {
         if (!process.env.GOOGLE_CLIENT_EMAIL) {
             throw new Error('GOOGLE_CLIENT_EMAIL is not set');
         }
-        
-        const privateKey = formatPrivateKey(process.env.GOOGLE_PRIVATE_KEY);
-        console.log('Key validation:', {
-            hasCorrectHeader: privateKey.includes('-----BEGIN PRIVATE KEY-----'),
-            hasCorrectFooter: privateKey.includes('-----END PRIVATE KEY-----'),
-            approximateLength: privateKey.length
-        });
 
+        const privateKey = formatPrivateKey(process.env.GOOGLE_PRIVATE_KEY);
+        
         const auth = new google.auth.GoogleAuth({
             credentials: {
                 client_email: process.env.GOOGLE_CLIENT_EMAIL,
